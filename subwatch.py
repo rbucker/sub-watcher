@@ -6,10 +6,23 @@
 # You Must leave this header in place. No other license offered.
 #
 
+""" This application is a general purpose subscriber for the redis publisher, it is intended
+to filter the published messages and only process the ones that match the criteria. (see the 
+command line options). There is even an option to rewrite the messages back into redis so
+that they will be persisted and queried by other applications. This tool will also be able
+to pull these records from the the tables for inspection.
+
+Posting the message back into 
+
+NOTE: I like some of the things in the PEP-8 and PEP-257(??) however I've been slamming
+this code out and I have not dotted all of my T's yet. You are welcome to help reformat
+and refactor.
+"""
 import re
 import sys
 import json
 import time
+import uuid
 import syslog
 import sqlite3
 import logging
@@ -21,12 +34,15 @@ import tornado
 from tornado.options import define, options
 
 # TODO: replace the code from tornadoweb with my own
-define("name",            default='subwatch',  help="override the application name when exporting logs", type=str)
+""" This may seem like a long list of params. Perhanps it is, however, they are necessary.
+"""
+# debug and misc options
 define("quiet",           default=False,       help="do not display warnings, errors, or info not related to the data", type=bool)
 define("debug",           default=False,       help="display debug messages overriding the quiet flag", type=bool)
 define("verbose",         default=False,       help="display debug messages overriding the verbose flag", type=bool)
-define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
-define("actions",         default='warning,error,fatal,exception',  help="one or more,  comma separated - no spaces, message levels to monitor or action upon", type=str)
+define("jsonfail",        default="alert",     help="level to report when json fails to parse the msg data", type=str)
+
+# REDIS common options
 define("host",            default='localhost', help="redis hostname", type=str)
 define("port",            default=6379,        help="redis port number", type=int)
 define("db",              default=0,           help="redis DB", type=int)
@@ -36,15 +52,34 @@ define("connection_pool", default=None,        help="connection pool", type=str)
 define("charset",         default='utf-8',     help="charsets", type=str)
 define("errors",          default='strict',    help="error reporting", type=str)
 define("socket_path",     default=None,        help="use the local socket path instead of TCP", type=str)
+
+# REDIS write options
+define("max_messages",    default=100,         help="maximum number of messages to be inserted into a queue (0=unlimited)", type=int)
+define("key_format",      default='%s:%s:msg', help="tags to be placed around the key for the message body", type=str)
+define("que_format",      default='err:%s:que',help="this is the message queue where all the msg uuid's are stored", type=str)
+define("score",           default='%s%010d',   help="format of the score element in the redis:sorted-list", type=str)
+define("score_tracker",   default='score_tracker',   help="table to keep track of the daily message id number used in the score", type=str)
+
+
+# REDIS read options
 define("redis",           default=False,       help="forward the actionable and matching to redis", type=bool)
+define("grouped",         default=False,       help="all of the messages that are actionable and filtered are stored in the same redis table", type=bool)
 define("last",            default=0,           help="get the last <n> messages", type=int)
 define("all",             default=False,       help="get the all messages", type=bool)
+
+# alternate push options
+define("name",            default='subwatch',  help="override the application name when exporting logs", type=str)
 define("userlog",         default=False,       help="forward the actionable and matching to user log function", type=bool)
 define("syslog",          default=False,       help="forward the actionable and matching to syslog", type=bool)
 define("console",         default=True,        help="forward the actionable and matching to the console", type=bool)
-define("match",           default="",          help="regular expression(s) to match to the message", type=str)
 define("format",          default="",          help="format of the message (TBD)", type=str)
-define("jsonfail",        default="alert",     help="level to report when json fails to parse the msg data", type=str)
+
+# matching options
+define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
+define("actions",         default='warning,error,fatal,exception',  help="one or more,  comma separated - no spaces, message levels to monitor or action upon", type=str)
+define("match",           default="",          help="regular expression(s) to match to the message", type=str)
+
+
 
 # SYSLOG
 # Priority levels (high to low):
@@ -65,6 +100,28 @@ priorities = {
 }
 
 actionable = []
+
+def now():
+    """formatted time the way I like it. note that the logger does it 
+    differently. At some point (ms) might be necessary
+    """
+    return time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
+
+def to_redis(r, priority, msg):
+    guid = str(uuid.uuid1())
+    id = options.key_format % (priority, guid)
+    d = time.strftime('%y%m%d',time.gmtime())
+    score = options.score % (d, r.hincrby(options.score_tracker, d, 1))
+    if options.debug:
+        print "The latest score is [%s]" % (score)
+    p = r.pipeline(transaction=True)
+    p.set(id, msg)
+    que = options.que_format % (priority)
+    #p.zadd((priority), score, id )
+    p.zadd(que, id, score )
+    #if options.max_messages > 0:
+    #    p.
+    p.execute()
 
 
 if __name__ == "__main__":
@@ -132,8 +189,8 @@ if __name__ == "__main__":
                             syslog.syslog(priority, m['data'])
                         if options.redis:
                             # TODO: send the message to the appropriate redis tables based on priority
-                            pass
-                        if options.user:
+                            to_redis(r, jmsg['level'], msg['data'])
+                        if options.userlog:
                             # TODO: this is a callback to a user function in a user class; needs to be better defined
                             pass
                     except:
