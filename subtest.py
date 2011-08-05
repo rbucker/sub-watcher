@@ -66,6 +66,8 @@ log = None
 def get_logger(name, channel):
     global log
     if not log:
+        if options.debug:
+            print "name: %s, channel: %s" % (name, channel)
         log = logger.RedisLogger(name)
         log.addHandler(handlers.RedisHandler.to(channel))
     return log
@@ -73,8 +75,9 @@ def get_logger(name, channel):
 def get_logger2():
     global log
     if not log:
-        log = logger.RedisLogger(conf['log_name'])
+	name = conf['log_name']
         channel = conf['log_channel'][0]
+        log = logger.RedisLogger(name)
         log.addHandler(handlers.RedisHandler.to(channel))
     return log
 
@@ -84,14 +87,14 @@ if __name__ == "__main__":
     if not options.quiet:
         print "starting..."
 
-    #logger = get_logger(options.name, options.channel)
-    l= get_logger2()
-    l.debug('test the alert message')
-    l.info('test the alert message')
-    l.warning('test the alert message')
-    l.error('test the alert message')
-    l.critical('test the alert message')
-    l.exception('test the alert message')
+    l = get_logger(options.name, options.channel)
+    #l= get_logger2()
+    l.debug('test the debug message')
+    l.info('test the info message')
+    l.warning('test the warning message')
+    l.error('test the error message')
+    l.critical('test the critical message')
+    l.exception('test the exception message')
 
     time.sleep(2)
 

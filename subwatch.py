@@ -24,8 +24,9 @@ from tornado.options import define, options
 define("name",            default='subwatch',  help="override the application name when exporting logs", type=str)
 define("quiet",           default=False,       help="do not display warnings, errors, or info not related to the data", type=bool)
 define("debug",           default=False,       help="display debug messages overriding the quiet flag", type=bool)
+define("verbose",         default=False,       help="display debug messages overriding the verbose flag", type=bool)
 define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
-define("actions",         default='warning,error,critical,exception',  help="one or more,  comma separated - no spaces, message levels to monitor or action upon", type=str)
+define("actions",         default='warning,error,fatal,exception',  help="one or more,  comma separated - no spaces, message levels to monitor or action upon", type=str)
 define("host",            default='localhost', help="redis hostname", type=str)
 define("port",            default=6379,        help="redis port number", type=int)
 define("db",              default=0,           help="redis DB", type=int)
@@ -59,7 +60,7 @@ priorities = {
     'info'      : syslog.LOG_INFO,
     'warning'   : syslog.LOG_WARNING,
     'error'     : syslog.LOG_ERR,
-    'critical'  : syslog.LOG_CRIT,
+    'fatal'     : syslog.LOG_CRIT,
     'exception' : syslog.LOG_ALERT,
 }
 
@@ -96,10 +97,13 @@ if __name__ == "__main__":
             actionable = options.actions.split(',')
             if options.debug:
                 print "actions [%s, %s]" % (options.actions, options.actions.split(','))
-                print "channels [%s, %s]" % (options.channels, options.channels.split(','))
+                print "name: %s, channels [%s, %s]" % (options.name, options.channels, options.channels.split(','))
             p = r.pubsub()
-            p.subscribe(options.channels.split(','))
+            p.subscribe(options.channels.split(',')[0])
             for msg in p.listen():
+                if options.debug and options.verbose:
+                    print "---------------------------------------------------------------------------------"
+                    print msg
                     # the redis logger should be sending JSON conforming messages
                 try:
                     jmsg = json.loads(msg['data'])
@@ -110,7 +114,7 @@ if __name__ == "__main__":
                     continue
                 work = False
                 try:
-                    actionable.index(msg['level'])
+                    actionable.index(jmsg['level'])
                     work = True
                 except:
                     # not actionable, do nothing
