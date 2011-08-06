@@ -96,7 +96,7 @@ if __name__ == "__main__":
     l.critical('test the critical message')
     l.exception('test the exception message')
 
-    time.sleep(2)
+    time.sleep(1)
 
     if not options.quiet:
         print "...DONE"

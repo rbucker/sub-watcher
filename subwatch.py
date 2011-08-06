@@ -20,6 +20,7 @@ and refactor.
 """
 import re
 import sys
+import csv
 import json
 import time
 import uuid
@@ -41,6 +42,7 @@ define("quiet",           default=False,       help="do not display warnings, er
 define("debug",           default=False,       help="display debug messages overriding the quiet flag", type=bool)
 define("verbose",         default=False,       help="display debug messages overriding the verbose flag", type=bool)
 define("jsonfail",        default="alert",     help="level to report when json fails to parse the msg data", type=str)
+define("format",          default="csv",       help="csv, tsv, html, json", type=str)
 
 # REDIS common options
 define("host",            default='localhost', help="redis hostname", type=str)
@@ -72,7 +74,6 @@ define("name",            default='subwatch',  help="override the application na
 define("userlog",         default=False,       help="forward the actionable and matching to user log function", type=bool)
 define("syslog",          default=False,       help="forward the actionable and matching to syslog", type=bool)
 define("console",         default=True,        help="forward the actionable and matching to the console", type=bool)
-define("format",          default="",          help="format of the message (TBD)", type=str)
 
 # matching options
 define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
@@ -107,25 +108,31 @@ def now():
     """
     return time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
 
+def from_redis(r, priority):
+    que = options.que_format % (priority)
+    if options.all:
+        return r.zrange(que, 0, -1, withscores=True, score_cast_func=int)
+    else:
+        return r.zrange(que, -1 * options.last, -1, withscores=True, score_cast_func=int)
+
 def to_redis(r, priority, msg):
-    guid = str(uuid.uuid1())
-    id = options.key_format % (priority, guid)
     d = time.strftime('%y%m%d',time.gmtime())
     score = options.score % (d, r.hincrby(options.score_tracker, d, 1))
+    que = options.que_format % (priority)
     if options.debug:
         print "The latest score is [%s]" % (score)
+    l = r.zcount(que,'-inf','+inf')
     p = r.pipeline(transaction=True)
-    p.set(id, msg)
-    que = options.que_format % (priority)
-    #p.zadd((priority), score, id )
-    p.zadd(que, id, score )
-    #if options.max_messages > 0:
-    #    p.
+    #p.zadd(queue, score, msg )
+    p.zadd(que, msg, score )
     p.execute()
+    if options.max_messages > 0 and l >= options.max_messages:
+        r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
 
 
 if __name__ == "__main__":
     tornado.options.parse_command_line()
+    actionable = options.actions.split(',')
     if not options.quiet:
         print "starting..."
     try:
@@ -142,8 +149,27 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     if options.all or options.last:
-        # TODO: get the error messages from redis and dump to stdout
-        pass
+        retval = []
+        for a in actionable:
+            for (data,score) in from_redis(r, a):
+                t = {}
+                t['score'] = score
+                t['data'] = data
+                retval.append(t)
+        if options.format == 'json':
+            print json.dumps(retval)
+        elif options.format == 'tsv': 
+            writer = csv.writer(sys.stdout, delimiter='\t')
+            for row in retval:
+                writer.writerow(row.values())
+        elif options.format == 'csv': 
+            writer = csv.writer(sys.stdout)
+            for row in retval:
+                writer.writerow(row.values())
+        elif options.format == 'html': 
+            pass
+        else:
+            print "invalid format"
     else:
         try:
             # TODO: work out the exception processing. It is possible that an attempt to exit via CTL+C will
@@ -151,7 +177,6 @@ if __name__ == "__main__":
             if options.syslog:
                 # TODO: add facilities and options
                 syslog.openlog(options.name)
-            actionable = options.actions.split(',')
             if options.debug:
                 print "actions [%s, %s]" % (options.actions, options.actions.split(','))
                 print "name: %s, channels [%s, %s]" % (options.name, options.channels, options.channels.split(','))
