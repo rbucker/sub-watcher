@@ -43,6 +43,7 @@ define("debug",           default=False,       help="display debug messages over
 define("verbose",         default=False,       help="display debug messages overriding the verbose flag", type=bool)
 define("jsonfail",        default="alert",     help="level to report when json fails to parse the msg data", type=str)
 define("format",          default="csv",       help="csv, tsv, html, json", type=str)
+define("header",          default=False,       help="True if the tsv, csv should have a header record", type=bool)
 
 # REDIS common options
 define("host",            default='localhost', help="redis hostname", type=str)
@@ -154,18 +155,31 @@ if __name__ == "__main__":
             for (data,score) in from_redis(r, a):
                 t = {}
                 t['score'] = score
-                t['data'] = data
+                try:
+                    jdata = json.loads(data)
+                    for k, v in jdata.items():
+                        t[k] = v
+                except:
+                    (error_type, error_value, error_traceback) = sys.exc_info()
+                    err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+                    t['data'] = data
                 retval.append(t)
         if options.format == 'json':
             print json.dumps(retval)
         elif options.format == 'tsv': 
-            writer = csv.writer(sys.stdout, delimiter='\t')
-            for row in retval:
-                writer.writerow(row.values())
+            writer = csv.writer(sys.stdout, delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
+            if len(retval) > 0:
+                if options.header:
+                    writer.writerow(retval[0].keys())
+                for row in retval:
+                    writer.writerow(row.values())
         elif options.format == 'csv': 
-            writer = csv.writer(sys.stdout)
-            for row in retval:
-                writer.writerow(row.values())
+            writer = csv.writer(sys.stdout, quoting=csv.QUOTE_NONNUMERIC)
+            if len(retval) > 0:
+                if options.header:
+                    writer.writerow(retval[0].keys())
+                for row in retval:
+                    writer.writerow(row.values())
         elif options.format == 'html': 
             pass
         else:
