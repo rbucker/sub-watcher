@@ -8,7 +8,8 @@
 
 
 """ This is the test program used to generate messages for the 
-subwatcher to listen to.
+subwatcher to listen to. This test program uses redis as the
+pubsub agent. A separate program will test ZMQ.
 """
 
 import sys

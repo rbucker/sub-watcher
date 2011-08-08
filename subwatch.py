@@ -134,6 +134,11 @@ def to_redis(r, priority, msg):
 if __name__ == "__main__":
     tornado.options.parse_command_line()
     actionable = options.actions.split(',')
+    try:
+        import zmq
+    except:
+        if not options.quiet:
+            print "ZMQ is not available"
     if not options.quiet:
         print "starting..."
     try:

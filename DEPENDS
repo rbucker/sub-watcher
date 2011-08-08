@@ -1,5 +1,15 @@
 
 
-This project currently depends on TornadoWeb and redislogging.
+This project currently depends on TornadoWeb, redislogging and redis.
+
+You must have a redis server available and tunning. I tested with 
+version 2.2.11. (2.4 is around the corner and I need to test the 
+libs before I can stamp it approved.)
+
+I will be adding ZeroMQ as an optional library shortly. This will
+load the zmq libs is they are available. The comandline options
+will only be available if the zmq libs are loaded or something 
+like that.
+
 
 /r
