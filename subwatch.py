@@ -102,20 +102,34 @@ priorities = {
     'exception' : syslog.LOG_ALERT,
 }
 
-actionable = []
 
 def now():
-    """formatted time the way I like it. note that the logger does it 
+    """ formatted time the way I like it. note that the logger does it 
     differently. At some point (ms) might be necessary
     """
     return time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
 
-def from_redis(r, priority):
-    que = options.que_format % (priority)
-    if options.all:
+
+def from_redis(r, que_format, priority, count):
+    """ query the previously captured records from redis. "level' = "priority". Priority is the name
+    given to the field in the syslog docs. See the "priorities" hash in order to see which ones
+    are supported.
+
+    Arguments:
+    priority - the priority level to search the redis DB for.
+    count - str='all', else int=the most recent # of records to return
+
+    returns:
+    a list of records as they were captured in the DB.
+    """
+    que = que_format % (priority)
+    if type(count) == str and count == 'all':
         return r.zrange(que, 0, -1, withscores=True, score_cast_func=int)
+    elif type(count) == int:
+        return r.zrange(que, -1 * count, -1, withscores=True, score_cast_func=int)
     else:
-        return r.zrange(que, -1 * options.last, -1, withscores=True, score_cast_func=int)
+        raise Exception('count has the wrong value [%s, %s]' % (type(count), count))
+
 
 def to_redis(r, priority, msg):
     d = time.strftime('%y%m%d',time.gmtime())
@@ -133,6 +147,7 @@ def to_redis(r, priority, msg):
 
 
 if __name__ == "__main__":
+    actionable = []
     tornado.options.parse_command_line()
     if options.actions == 'all':
         actionable = all_actions
@@ -161,7 +176,10 @@ if __name__ == "__main__":
     if options.all or options.last:
         retval = []
         for a in actionable:
-            for (data,score) in from_redis(r, a):
+            count = options.last
+            if options.all:
+                count = 'all'
+            for (data,score) in from_redis(r, options.que_format, a, count):
                 t = {}
                 t['score'] = score
                 try:
