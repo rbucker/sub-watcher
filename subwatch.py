@@ -92,6 +92,7 @@ define("match",           default="",          help="regular expression(s) to ma
 # LOG_PID, LOG_CONS, LOG_NDELAY, LOG_NOWAIT and LOG_PERROR if defined in <syslog.h>.
 
 # convert the plaintext error to the syslog integer value
+all_actions = ['debug','info','warning','error','fatal','exception']
 priorities = {
     'debug'     : syslog.LOG_DEBUG,
     'info'      : syslog.LOG_INFO,
@@ -133,7 +134,10 @@ def to_redis(r, priority, msg):
 
 if __name__ == "__main__":
     tornado.options.parse_command_line()
-    actionable = options.actions.split(',')
+    if options.actions == 'all':
+        actionable = all_actions
+    else:
+        actionable = options.actions.split(',')
     try:
         import zmq
     except:
@@ -197,7 +201,7 @@ if __name__ == "__main__":
                 # TODO: add facilities and options
                 syslog.openlog(options.name)
             if options.debug:
-                print "actions [%s, %s]" % (options.actions, options.actions.split(','))
+                print "actions: %s" % (str(actionable))
                 print "name: %s, channels [%s, %s]" % (options.name, options.channels, options.channels.split(','))
             p = r.pubsub()
             p.subscribe(options.channels.split(',')[0])
