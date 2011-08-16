@@ -21,7 +21,7 @@ and refactor.
 import re
 import sys
 import csv
-import json
+import simplejson as json
 import time
 import uuid
 import syslog

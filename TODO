@@ -1,0 +1,24 @@
+#
+# Copyright(c) 2011, Florida Freelance IT LLC
+# Richard Bucker <richard@flafreeit.com>
+# No Warranties are offered or implied. Use at your own risk.
+# You Must leave this header in place. No other license offered.
+#
+
+
+
+There are a lot of things to do, however, here is the beginnings of my list:
+
+Add keep param
+Add keep by number of days
+Store cfg in redis and update with command line.
+Add update cfg command
+Add timestamp to options
+Check options timestamp periodically
+Capture hup event and reload now
+
+
+
+/r
+
+__END__

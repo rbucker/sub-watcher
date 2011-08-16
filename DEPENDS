@@ -1,8 +1,22 @@
+#
+# Copyright(c) 2011, Florida Freelance IT LLC
+# Richard Bucker <richard@flafreeit.com>
+# No Warranties are offered or implied. Use at your own risk.
+# You Must leave this header in place. No other license offered.
+#
 
 
-This project currently depends on TornadoWeb, redislogging and redis.
+This project currently depends on TornadoWeb, redislogging, redis-py and redis.
 
-You must have a redis server available and tunning. I tested with 
+* TornadoWeb because I like the way it handles the command line options
+* redis logging because it's simple enough; although I'd prefer to 
+  incorporate some native code instead of yet another library which
+  goes against the grain.
+* redis-py these libs are needed by the reporting portion of the watcher.
+* redis goes without saying that this code needs to connect to an available
+  redis server out there.
+
+You must have a redis server available and running. I tested with 
 version 2.2.11. (2.4 is around the corner and I need to test the 
 libs before I can stamp it approved.)
 

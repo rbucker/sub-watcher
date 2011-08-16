@@ -1,0 +1,49 @@
+#
+# Copyright(c) 2011, Florida Freelance IT LLC
+# Richard Bucker <richard@flafreeit.com>
+# No Warranties are offered or implied. Use at your own risk.
+# You Must leave this header in place. No other license offered.
+#
+
+The installation process is pretty simple. I'll script it here so that the
+lazy people can just run it a command at a time. With the exception that
+I'm not going to tell you how to install python for your distribution. Also, 
+this assumes that you are using a linux distro... in my case Ubuntu 10.04 (TLS).
+
+PS: I thought about putting the dependencies in the source tree but I realized
+I did not want the responsibility. I suppose I could create a separate project
+called sub-watcher-deps but that also sucks. Besides I have other projects
+that depend on this project and I don't like the idea that there may be multiple
+versions of deps hanging around.
+
+Food for thought anyway.
+
+--[BEGIN]--
+cd /tmp
+wget https://github.com/downloads/facebook/tornado/tornado-2.0.tar.gz
+tar zxvf tornado-2.0.tar.gz
+cd tornado-2.0
+python setup.py install
+
+cd /tmp
+wget http://redis.googlecode.com/files/redis-2.2.12.tar.gz
+tar zxvf redis-2.2.12.tar.gz
+cd redis-2.2.12
+make
+make install
+
+cd /tmp
+git clone https://github.com/andymccurdy/redis-py.git
+cd redis-py
+python ./setup.py install
+
+cd /tmp
+git clone https://github.com/jedp/python-redis-log
+cd python-redis-log
+python ./setup.py install
+--[END]--
+
+Once you have completed the task above, move these python executables 
+anywhere you want.
+
+__END__

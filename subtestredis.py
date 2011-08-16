@@ -13,7 +13,7 @@ pubsub agent. A separate program will test ZMQ.
 """
 
 import sys
-import json
+import simplejson as json
 import time
 import uuid
 import syslog
