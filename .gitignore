@@ -1,0 +1,8 @@
+build/
+dist/
+python_redis_log.egg-info/
+
+*.pyc
+*.un~
+*.swp
+*.swo
