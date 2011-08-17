@@ -155,6 +155,10 @@ def to_redis(r, priority, msg):
         r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
 
 def process(actionable,msg):
+    """ this function is going to process the incoming message. This is the
+    inner-most part of the message as it was presented from the publishing
+    application. Therefore all of the wrappers have been removed.
+    """
     if options.debug and options.verbose:
         print "---------------------------------------------------------------------------------"
         print msg
@@ -196,11 +200,6 @@ if __name__ == "__main__":
         actionable = all_actions
     else:
         actionable = options.actions.split(',')
-    try:
-        import zmq
-    except:
-        if not options.quiet:
-            print "ZMQ is not available"
     if not options.quiet:
         print "starting..."
     try:
@@ -259,10 +258,15 @@ if __name__ == "__main__":
         socket = context.socket(zmq.SUB)
         print "connecting...", options.zurl
         socket.bind(options.zurl)
+        # TODO: add options.channels to the subscribe filter
         socket.setsockopt(zmq.SUBSCRIBE, '')
         poller = zmq.Poller()
         poller.register(socket, zmq.POLLIN)
         while True:
+            # zmq messages are formatted something like:
+            #    <channel>::<json formatted message>
+            # before passing the "message" to the process() function the
+            # wrapper (leading parts must be removed)
             socks = dict(poller.poll(options.ztimeout))
             if socks.get(socket) == zmq.POLLIN:
                 msg = socket.recv()
@@ -290,6 +294,9 @@ if __name__ == "__main__":
                     syslog.syslog(priority, 'failed to decode the message: %s' % (str(err)))
                     # next message
                     continue
+                # messages coming from redis have a JSON wrapper around them.
+                # since 'jmsg' represents the publisher's message then this
+                # is what we should process()
                 process(actionable,jmsg)
         except exceptions.KeyboardInterrupt:
             err = "Keyboard Interrupt..."
