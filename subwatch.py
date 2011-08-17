@@ -30,6 +30,11 @@ import logging
 import traceback
 import exceptions
 
+try:
+    import zmq
+except:
+    print "ZMQ is not available"
+    pass
 import redis
 import tornado
 from tornado.options import define, options
@@ -63,12 +68,16 @@ define("que_format",      default='err:%s:que',help="this is the message queue w
 define("score",           default='%s%010d',   help="format of the score element in the redis:sorted-list", type=str)
 define("score_tracker",   default='score_tracker',   help="table to keep track of the daily message id number used in the score", type=str)
 
-
 # REDIS read options
 define("redis",           default=False,       help="forward the actionable and matching to redis", type=bool)
 define("grouped",         default=False,       help="all of the messages that are actionable and filtered are stored in the same redis table", type=bool)
 define("last",            default=0,           help="get the last <n> messages", type=int)
 define("all",             default=False,       help="get the all messages", type=bool)
+
+# ZeroMQ
+define("zmq",             default=False,       help="subscribe to a zmq publisher", type=bool)
+define("zurl",            default='tcp://127.0.0.1:5555', help="ZeroMQ URI", type=str)
+define("ztimeout",        default=20,          help="zmq poll timeout in seconds", type=int)
 
 # alternate push options
 define("name",            default='subwatch',  help="override the application name when exporting logs", type=str)
@@ -211,6 +220,20 @@ if __name__ == "__main__":
             pass
         else:
             print "invalid format"
+    elif options.zmq:
+        context = zmq.Context()
+        socket = context.socket(zmq.SUB)
+        print "connecting...", options.zurl
+        socket.bind(options.zurl)
+        socket.setsockopt(zmq.SUBSCRIBE, '')
+        poller = zmq.Poller()
+        poller.register(socket, zmq.POLLIN)
+        while True:
+            socks = dict(poller.poll(options.ztimeout))
+            if socks.get(socket) == zmq.POLLIN:
+                msg = socket.recv()
+                print msg
+
     else:
         try:
             # TODO: work out the exception processing. It is possible that an attempt to exit via CTL+C will

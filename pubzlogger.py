@@ -49,7 +49,7 @@ class PubLogger(object):
     """This is a wrapper around the logger class. It's meant to make things 
     easier.
     """
-    def __init__(self, name=iama, channel=iama, url='localhost', port=5555):
+    def __init__(self, name=iama, channel=iama, url='tcp://localhost', port=5555):
         self.name    = name
         self.channel = channel
         self.url     = url
