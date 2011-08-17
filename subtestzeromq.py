@@ -31,13 +31,6 @@ define("debug",           default=False,       help="display debug messages over
 define("channel",         default='subwatch',  help="one  channel name", type=str)
 
 
-def now():
-    """formatted time the way I like it. note that the logger does it 
-    differently. At some point (ms) might be necessary
-    """
-    return time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
-
-# the log is a singleton
 log = None
 def get_logger(name, channel):
     global log
@@ -54,7 +47,7 @@ if __name__ == "__main__":
         print "starting..."
 
     l = get_logger(options.name, options.channel)
-    tsleep = 5
+    tsleep = 2
     # gotta sleep for a bit, the connection latency can cause messages to be
     # dropped, so for this case... patience.
     print "sleeping %d seconds..." % (tsleep)

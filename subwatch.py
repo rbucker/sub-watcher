@@ -46,7 +46,7 @@ from tornado.options import define, options
 define("quiet",           default=False,       help="do not display warnings, errors, or info not related to the data", type=bool)
 define("debug",           default=False,       help="display debug messages overriding the quiet flag", type=bool)
 define("verbose",         default=False,       help="display debug messages overriding the verbose flag", type=bool)
-define("jsonfail",        default="alert",     help="level to report when json fails to parse the msg data", type=str)
+define("jsonfail",        default="fatal",     help="level to report when json fails to parse the msg data", type=str)
 define("format",          default="csv",       help="csv, tsv, html, json", type=str)
 define("header",          default=False,       help="True if the tsv, csv should have a header record", type=bool)
 
@@ -154,6 +154,40 @@ def to_redis(r, priority, msg):
     if options.max_messages > 0 and l >= options.max_messages:
         r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
 
+def process(actionable,msg):
+    if options.debug and options.verbose:
+        print "---------------------------------------------------------------------------------"
+        print msg
+        # the redis logger should be sending JSON conforming messages
+    work = False
+    try:
+        actionable.index(jmsg['level'])
+        work = True
+    except:
+        # not actionable, do nothing
+        return
+    if work:
+        try:
+            if options.console:
+                print msg
+            if options.syslog:
+                try:
+                    priority = priorities[jmsg['level']]
+                except:
+                    priority = syslog.LOG_ALERT
+                    syslog.syslog(priority, 'The message level is not recognized [%s] add to the priorities map.' % (msg['level']))
+                syslog.syslog(priority, m['data'])
+            if options.redis:
+                # TODO: send the message to the appropriate redis tables based on priority
+                to_redis(r, jmsg['level'], msg['data'])
+            if options.userlog:
+                # TODO: this is a callback to a user function in a user class; needs to be better defined
+                pass
+        except:
+            (error_type, error_value, error_traceback) = sys.exc_info()
+            err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+            priority = syslog.LOG_EMERG
+            syslog.syslog(priority, 'something went wrong sending the message out: %s' % (str(err)))
 
 if __name__ == "__main__":
     actionable = []
@@ -232,7 +266,9 @@ if __name__ == "__main__":
             socks = dict(poller.poll(options.ztimeout))
             if socks.get(socket) == zmq.POLLIN:
                 msg = socket.recv()
-                print msg
+                msg = msg.split('::',1)[1]
+                jmsg = json.loads(msg)
+                process(actionable,jmsg)
 
     else:
         try:
@@ -247,10 +283,6 @@ if __name__ == "__main__":
             p = r.pubsub()
             p.subscribe(options.channels.split(',')[0])
             for msg in p.listen():
-                if options.debug and options.verbose:
-                    print "---------------------------------------------------------------------------------"
-                    print msg
-                    # the redis logger should be sending JSON conforming messages
                 try:
                     jmsg = json.loads(msg['data'])
                 except:
@@ -258,35 +290,7 @@ if __name__ == "__main__":
                     syslog.syslog(priority, 'failed to decode the message: %s' % (str(err)))
                     # next message
                     continue
-                work = False
-                try:
-                    actionable.index(jmsg['level'])
-                    work = True
-                except:
-                    # not actionable, do nothing
-                    continue
-                if work:
-                    try:
-                        if options.console:
-                            print msg['data']
-                        if options.syslog:
-                            try:
-                                priority = priorities[jmsg['level']]
-                            except:
-                                priority = syslog.LOG_ALERT
-                                syslog.syslog(priority, 'The message level is not recognized [%s] add to the priorities map.' % (msg['level']))
-                            syslog.syslog(priority, m['data'])
-                        if options.redis:
-                            # TODO: send the message to the appropriate redis tables based on priority
-                            to_redis(r, jmsg['level'], msg['data'])
-                        if options.userlog:
-                            # TODO: this is a callback to a user function in a user class; needs to be better defined
-                            pass
-                    except:
-                        (error_type, error_value, error_traceback) = sys.exc_info()
-                        err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
-                        priority = syslog.LOG_EMERG
-                        syslog.syslog(priority, 'something went wrong sending the message out: %s' % (str(err)))
+                process(actionable,jmsg)
         except exceptions.KeyboardInterrupt:
             err = "Keyboard Interrupt..."
             if not options.quiet:
