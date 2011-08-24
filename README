@@ -31,6 +31,11 @@ NOTES: this is the version of the redis-logger that I'm using. It's nice and
 simple. The part I like best is the way it handles exceptions and traceback.
 The use of a JSON wrapper makes parsing the data easier.
     https://github.com/jedp/python-redis-log
+
+And I forked that project to create a basis for the ZeroMQ version with
+exactly the same behavior.
+    https://github.com/rbucker881/python-zeromq-log
+
     
 NOTES: this is a nice alternative approach:
     http://sunilarora.org/another-redis-use-case-centralized-logging
