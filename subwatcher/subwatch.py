@@ -203,8 +203,13 @@ def to_redis(r, priority, msg):
             print "The latest score is [%s]" % (score)
         l = r.zcount(que,'-inf','+inf')
         p = r.pipeline(transaction=True)
-        #p.zadd(queue, score, msg )
+        #p.zadd(que, score, msg )
         p.zadd(que, msg, score )
+        try:
+            # set the bucket to expire if no data inserted after the TTL (seconds)
+            p.expire(que, options.ttl)
+        except:
+            pass
         p.execute()
         if options.max_messages > 0 and l >= options.max_messages:
             r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
