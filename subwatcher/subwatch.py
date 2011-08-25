@@ -8,7 +8,7 @@
 
 """ This application is a general purpose subscriber for the redis publisher, it is intended
 to filter the published messages and only process the ones that match the criteria. (see the 
-command line options). There is even an option to rewrite the messages back into redis so
+command line options). There is even an option to rewrite the messages back into [redis, riak] so
 that they will be persisted and queried by other applications. This tool will also be able
 to pull these records from the the tables for inspection.
 
@@ -35,9 +35,20 @@ try:
 except:
     print "ZMQ is not available"
     pass
-import redis
+try:
+    import riak
+except:
+    print "Riak is not available"
+    pass
+try:
+    import redis
+except:
+    print "Redis is not available"
+    pass
 import tornado
 from tornado.options import define, options
+
+iama = 'subwatch'
 
 # TODO: replace the code from tornadoweb with my own
 """ This may seem like a long list of params. Perhanps it is, however, they are necessary.
@@ -61,15 +72,22 @@ define("charset",         default='utf-8',     help="charsets", type=str)
 define("errors",          default='strict',    help="error reporting", type=str)
 define("socket_path",     default=None,        help="use the local socket path instead of TCP", type=str)
 
+# RIAK common options
+define("bucket",          default=iama,        help="bucket name when exporting logs", type=str)
+define("rhost",           default='localhost', help="riak hostname", type=str)
+define("rport",           default=8098,        help="riak port number", type=int)
+define("rprefix",         default='riak',      help="interface prefix", type=str)
+
 # REDIS write options
 define("max_messages",    default=100,         help="maximum number of messages to be inserted into a queue (0=unlimited)", type=int)
 define("key_format",      default='%s:%s:msg', help="tags to be placed around the key for the message body", type=str)
 define("que_format",      default='err:%s:que',help="this is the message queue where all the msg uuid's are stored", type=str)
 define("score",           default='%s%010d',   help="format of the score element in the redis:sorted-list", type=str)
 define("score_tracker",   default='score_tracker',   help="table to keep track of the daily message id number used in the score", type=str)
+define("ttl",             default=0,           help="redis TTL/expire", type=int)
 
-# REDIS read options
-define("redis",           default=False,       help="forward the actionable and matching to redis", type=bool)
+# REDIS/RIAK read options
+define("source",          default='redis',     help="where to read the log entries from [redis, riak]", type=str)
 define("grouped",         default=False,       help="all of the messages that are actionable and filtered are stored in the same redis table", type=bool)
 define("last",            default=0,           help="get the last <n> messages", type=int)
 define("all",             default=False,       help="get the all messages", type=bool)
@@ -80,10 +98,8 @@ define("zurl",            default='tcp://127.0.0.1:5555', help="ZeroMQ URI", typ
 define("ztimeout",        default=20,          help="zmq poll timeout in seconds", type=int)
 
 # alternate push options
-define("name",            default='subwatch',  help="override the application name when exporting logs", type=str)
-define("userlog",         default=False,       help="forward the actionable and matching to user log function", type=bool)
-define("syslog",          default=False,       help="forward the actionable and matching to syslog", type=bool)
-define("console",         default=True,        help="forward the actionable and matching to the console", type=bool)
+define("name",            default=iama,        help="override the application name when exporting logs", type=str)
+define("relay",           default='console',   help="one or more,  comma separated - no spaces, message levels to monitor or action upon [console, redis, riak, syslog, userlog]", type=str)
 
 # matching options
 define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
@@ -111,6 +127,9 @@ priorities = {
     'exception' : syslog.LOG_ALERT,
 }
 
+# transient data
+connections = {}
+
 
 def now():
     """ formatted time the way I like it. note that the logger does it 
@@ -118,6 +137,41 @@ def now():
     """
     return time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
 
+timecache = {}
+def ubernow():
+    """ formatted time the way I like it. note that the logger does it 
+    differently. At some point (ms) might be necessary
+    """
+    global timecache
+    t = time.strftime('%Y%m%d%H%M',time.gmtime())
+    try:
+        x = timecache[t] + 1
+        timecache[t] = x
+        return "%s.%06d" % (t,x)
+    except:
+        timecache = {}
+        timecache[t] = 0
+        return ubernow()
+
+
+def from_riak(r, que_format, priority, count):
+    return []
+    
+def to_riak(r, priority, msg):
+    try:
+        score = ubernow()
+        que = options.que_format % (priority)
+        if not options.quiet and options.verbose:
+            print "verbose: %s -> %s" % (que, score)
+        bucket = r.bucket(que)
+        rec = bucket.new(score, data=msg)
+        rec.store()
+    except:
+        (error_type, error_value, error_traceback) = sys.exc_info()
+        err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+        syslog.syslog(priority, str(err))
+        if not options.quiet:
+            print err
 
 def from_redis(r, que_format, priority, count):
     """ query the previously captured records from redis. "level' = "priority". Priority is the name
@@ -141,20 +195,27 @@ def from_redis(r, que_format, priority, count):
 
 
 def to_redis(r, priority, msg):
-    d = time.strftime('%y%m%d',time.gmtime())
-    score = options.score % (d, r.hincrby(options.score_tracker, d, 1))
-    que = options.que_format % (priority)
-    if options.debug:
-        print "The latest score is [%s]" % (score)
-    l = r.zcount(que,'-inf','+inf')
-    p = r.pipeline(transaction=True)
-    #p.zadd(queue, score, msg )
-    p.zadd(que, msg, score )
-    p.execute()
-    if options.max_messages > 0 and l >= options.max_messages:
-        r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
+    try:
+        d = time.strftime('%y%m%d',time.gmtime())
+        score = options.score % (d, r.hincrby(options.score_tracker, d, 1))
+        que = options.que_format % (priority)
+        if options.debug:
+            print "The latest score is [%s]" % (score)
+        l = r.zcount(que,'-inf','+inf')
+        p = r.pipeline(transaction=True)
+        #p.zadd(queue, score, msg )
+        p.zadd(que, msg, score )
+        p.execute()
+        if options.max_messages > 0 and l >= options.max_messages:
+            r.zremrangebyrank(que,0,(options.max_messages + 1) * -1)
+    except:
+        (error_type, error_value, error_traceback) = sys.exc_info()
+        err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+        syslog.syslog(priority, str(err))
+        if not options.quiet:
+            print err
 
-def process(actionable,msg):
+def process(connections,actionable,msg):
     """ this function is going to process the incoming message. This is the
     inner-most part of the message as it was presented from the publishing
     application. Therefore all of the wrappers have been removed.
@@ -172,20 +233,40 @@ def process(actionable,msg):
         return
     if work:
         try:
-            if options.console:
+            try:
+                options.relay.index('console')
                 print msg
-            if options.syslog:
+            except:
+                pass
+            try:
+                options.relay.index('syslog')
                 try:
                     priority = priorities[jmsg['level']]
                 except:
                     priority = syslog.LOG_ALERT
                     syslog.syslog(priority, 'The message level is not recognized [%s] add to the priorities map.' % (msg['level']))
                 syslog.syslog(priority, m['data'])
-            if options.redis:
+            except:
+                pass
+            try:
+                options.relay.index('redis')
                 # TODO: send the message to the appropriate redis tables based on priority
-                to_redis(r, jmsg['level'], msg['data'])
-            if options.userlog:
-                # TODO: this is a callback to a user function in a user class; needs to be better defined
+                to_redis(connections['redis'], jmsg['level'], msg)
+            except:
+                pass
+            try:
+                options.relay.index('riak')
+                # TODO: send the message to the appropriate redis tables based on priority
+                to_riak(connections['riak'], jmsg['level'], msg)
+            except:
+                (error_type, error_value, error_traceback) = sys.exc_info()
+                err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+                print err
+                pass
+            try:
+                options.relay.index('userlog')
+                # TODO: define and implement the plug-in strategy
+            except:
                 pass
         except:
             (error_type, error_value, error_traceback) = sys.exc_info()
@@ -202,26 +283,52 @@ if __name__ == "__main__":
         actionable = options.actions.split(',')
     if not options.quiet:
         print "starting..."
-    try:
-        if options.socket_path:
-            r = redis.StrictRedis(unix_socket_path=options.socket_path)
-        else:
-            r = redis.StrictRedis(host=options.host, port=options.port, db=options.db)
-        r.ping()
-    except:
-        (error_type, error_value, error_traceback) = sys.exc_info()
-        err = "could not connect to redis:", error_type, repr(traceback.format_tb(error_traceback))
-        if not options.quiet:
-            print err
-        sys.exit(-1)
-
+    if options.source.find('redis') >= 0 or options.relay.find('redis') >= 0:
+        if not options.quiet and options.verbose:
+            print "connecting to redis"
+        try:
+            if options.socket_path:
+                r = redis.StrictRedis(unix_socket_path=options.socket_path)
+            else:
+                r = redis.StrictRedis(host=options.host, port=options.port, db=options.db)
+            r.ping()
+            connections['redis'] = r
+        except:
+            (error_type, error_value, error_traceback) = sys.exc_info()
+            err = "could not connect to redis:", error_type, repr(traceback.format_tb(error_traceback))
+            if not options.quiet:
+                print err
+            sys.exit(-1)
+    if options.source.find('riak') >= 0 or options.relay.find('riak') >= 0:
+        if not options.quiet and options.verbose:
+            print "connecting to riak"
+        try:
+            rk = riak.RiakClient(host=options.rhost, port=options.rport, prefix=options.rprefix)
+            connections['riak'] = rk
+        except:
+            (error_type, error_value, error_traceback) = sys.exc_info()
+            err = "could not connect to riak:", error_type, repr(traceback.format_tb(error_traceback))
+            if not options.quiet:
+                print err
+            sys.exit(-1)
     if options.all or options.last:
         retval = []
         for a in actionable:
             count = options.last
             if options.all:
                 count = 'all'
-            for (data,score) in from_redis(r, options.que_format, a, count):
+            remote_data = []
+            try:
+                options.source.index('redis')
+                remote_data = from_redis(r, options.que_format, a, count)
+            except:
+                pass
+            try:
+                options.source.index('riak')
+                remote_data = from_riak(rk, options.que_format, a, count)
+            except:
+                pass
+            for (data,score) in remote_data:
                 t = {}
                 t['score'] = score
                 try:
@@ -272,15 +379,18 @@ if __name__ == "__main__":
                 msg = socket.recv()
                 msg = msg.split('::',1)[1]
                 jmsg = json.loads(msg)
-                process(actionable,jmsg)
+                process(connections,actionable,jmsg)
 
     else:
         try:
             # TODO: work out the exception processing. It is possible that an attempt to exit via CTL+C will
             # fail if the exception is caught in one of the inner try/except blocks.
-            if options.syslog:
+            try:
+                options.relay.index('syslog')
                 # TODO: add facilities and options
                 syslog.openlog(options.name)
+            except:
+                pass
             if options.debug:
                 print "actions: %s" % (str(actionable))
                 print "name: %s, channels [%s, %s]" % (options.name, options.channels, options.channels.split(','))
@@ -297,7 +407,7 @@ if __name__ == "__main__":
                 # messages coming from redis have a JSON wrapper around them.
                 # since 'jmsg' represents the publisher's message then this
                 # is what we should process()
-                process(actionable,jmsg)
+                process(connections, actionable, jmsg)
         except exceptions.KeyboardInterrupt:
             err = "Keyboard Interrupt..."
             if not options.quiet:
