@@ -45,6 +45,11 @@ try:
 except:
     print "Redis is not available"
     pass
+try:
+    import pymongo
+except:
+    print "Mongo (pymongo) is not available"
+    pass
 import tornado
 from tornado.options import define, options
 
@@ -78,6 +83,12 @@ define("rhost",           default='localhost', help="riak hostname", type=str)
 define("rport",           default=8098,        help="riak port number", type=int)
 define("rprefix",         default='riak',      help="interface prefix", type=str)
 
+# MONGO common options
+define("phost",           default='localhost', help="mongodb hostname", type=str)
+define("pport",           default=27017,       help="mongodb port number", type=int)
+define("pdb",             default=iama,        help="mongodb database name", type=str)
+define("pcollection",     default=iama,        help="mongodb database collection name", type=str)
+
 # REDIS write options
 define("max_messages",    default=100,         help="maximum number of messages to be inserted into a queue (0=unlimited)", type=int)
 define("key_format",      default='%s:%s:msg', help="tags to be placed around the key for the message body", type=str)
@@ -87,7 +98,7 @@ define("score_tracker",   default='score_tracker',   help="table to keep track o
 define("ttl",             default=0,           help="redis TTL/expire", type=int)
 
 # REDIS/RIAK read options
-define("source",          default='redis',     help="where to read the log entries from [redis, riak]", type=str)
+define("source",          default='redis',     help="where to read the log entries from [redis, riak, mongodb]", type=str)
 define("grouped",         default=False,       help="all of the messages that are actionable and filtered are stored in the same redis table", type=bool)
 define("last",            default=0,           help="get the last <n> messages", type=int)
 define("all",             default=False,       help="get the all messages", type=bool)
@@ -99,7 +110,7 @@ define("ztimeout",        default=20,          help="zmq poll timeout in seconds
 
 # alternate push options
 define("name",            default=iama,        help="override the application name when exporting logs", type=str)
-define("relay",           default='console',   help="one or more,  comma separated - no spaces, message levels to monitor or action upon [console, redis, riak, syslog, userlog]", type=str)
+define("relay",           default='console',   help="one or more,  comma separated - no spaces, message levels to monitor or action upon [console, redis, riak, mongodb, syslog, userlog]", type=str)
 
 # matching options
 define("channels",        default='subwatch',  help="one or more,  comma separated - no spaces, channel name(s) to monitor", type=str)
@@ -154,6 +165,30 @@ def ubernow():
         return ubernow()
 
 
+def from_mongo(r, que_format, priority, count):
+    return []
+
+def to_mongo(r, priority, msg):
+    try:
+        score = ubernow()
+        que = options.que_format % (priority)        
+        if not options.quiet and options.verbose:
+            print "mongo verbose: %s -> %s" % (que, score)
+        try:
+            c = r[que]
+        except:
+            syslog.syslog(priority, str('collection does not exist'))
+            c = pymongo.collection.Collection(r, que, create=True)
+            c = r[que]
+        c.insert(msg) 
+    except:
+        (error_type, error_value, error_traceback) = sys.exc_info()
+        err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
+        print err
+        syslog.syslog(priority, str(err))
+        if not options.quiet:
+            print err
+
 def from_riak(r, que_format, priority, count):
     return []
     
@@ -162,7 +197,7 @@ def to_riak(r, priority, msg):
         score = ubernow()
         que = options.que_format % (priority)
         if not options.quiet and options.verbose:
-            print "verbose: %s -> %s" % (que, score)
+            print "riak verbose: %s -> %s" % (que, score)
         bucket = r.bucket(que)
         rec = bucket.new(score, data=msg)
         rec.store()
@@ -264,9 +299,12 @@ def process(connections,actionable,msg):
                 # TODO: send the message to the appropriate redis tables based on priority
                 to_riak(connections['riak'], jmsg['level'], msg)
             except:
-                (error_type, error_value, error_traceback) = sys.exc_info()
-                err = "Unexpected error:", error_type, repr(traceback.format_tb(error_traceback))
-                print err
+                pass
+            try:
+                options.relay.index('mongodb')
+                # TODO: send the message to the appropriate redis tables based on priority
+                to_mongo(connections['mongodb'], jmsg['level'], msg)
+            except:
                 pass
             try:
                 options.relay.index('userlog')
@@ -313,6 +351,23 @@ if __name__ == "__main__":
         except:
             (error_type, error_value, error_traceback) = sys.exc_info()
             err = "could not connect to riak:", error_type, repr(traceback.format_tb(error_traceback))
+            if not options.quiet:
+                print err
+            sys.exit(-1)
+    if options.source.find('mongodb') >= 0 or options.relay.find('mongodb') >= 0:
+        if not options.quiet and options.verbose:
+            print "connecting to mongodb"
+        try:
+            mo = pymongo.Connection(host=options.phost, port=options.pport)
+            db = mo.test
+            db.name.index('test')
+            
+            db = pymongo.database.Database(mo, options.pdb)
+            db = mo[options.pdb]
+            connections['mongodb'] = db
+        except:
+            (error_type, error_value, error_traceback) = sys.exc_info()
+            err = "could not connect to mongodb:", error_type, repr(traceback.format_tb(error_traceback))
             if not options.quiet:
                 print err
             sys.exit(-1)
